@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ERA SAMOOBSŁUGI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; }
+    .song-row:hover { background-color: #2a2a2a; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto flex">
+  <!-- Sidebar -->
+  <div class="w-72 bg-black h-screen p-6 fixed flex flex-col">
+    <div class="flex items-center gap-3 mb-10">
+      <i class="fa-solid fa-music text-4xl text-green-500"></i>
+      <h1 class="text-3xl font-bold">ERA SAMOOBSŁUGI</h1>
+    </div>
+
+    <button onclick="document.getElementById('fileInput').click()" 
+            class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-semibold flex items-center justify-center gap-3 mb-8">
+      <i class="fa-solid fa-upload"></i> DODAJ UTWÓR
+    </button>
+    <input type="file" id="fileInput" accept="audio/*" class="hidden" onchange="uploadSong(event)">
+  </div>
+
+  <!-- Główna treść -->
+  <div class="ml-72 flex-1 p-8">
+    <h1 class="text-4xl font-bold mb-8">Biblioteka</h1>
+    
+    <input id="search" type="text" placeholder="Szukaj utworu lub artysty..." 
+           class="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-full px-6 py-3 mb-10 focus:outline-none focus:border-green-500"
+           onkeyup="filterSongs()">
+
+    <table class="w-full">
+      <thead>
+        <tr class="border-b border-zinc-800 text-zinc-400">
+          <th class="text-left py-4 w-12">#</th>
+          <th class="text-left">Tytuł</th>
+          <th class="text-left">Wykonawca</th>
+          <th class="w-44"></th>
+        </tr>
+      </thead>
+      <tbody id="songList" class="text-zinc-200"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Player -->
+<div class="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-700 h-20 flex items-center px-8 gap-6">
+  <div class="flex items-center gap-4 w-80">
+    <div id="playerCover" class="w-12 h-12 bg-zinc-800 rounded-lg overflow-hidden flex items-center justify-center">
+      <i class="fa-solid fa-music text-xl"></i>
+    </div>
+    <div>
+      <div id="playerTitle" class="font-medium">Wybierz utwór</div>
+      <div id="playerArtist" class="text-sm text-zinc-400">-</div>
+    </div>
+  </div>
+  <div class="flex-1 flex justify-center">
+    <button onclick="togglePlay()" class="w-12 h-12 bg-white text-black rounded-full flex items-center justify-center hover:scale-105 transition">
+      <i class="fa-solid fa-play"></i>
+    </button>
+  </div>
+</div>
+
+<!-- Modal edycji -->
+<div id="editModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+  <div class="bg-zinc-900 rounded-2xl w-full max-w-md p-8">
+    <h2 class="text-2xl font-bold mb-6">Edytuj utwór</h2>
+    
+    <div class="flex justify-center mb-6">
+      <div id="modalCover" onclick="document.getElementById('coverInput').click()" 
+           class="w-40 h-40 bg-zinc-800 rounded-2xl overflow-hidden cursor-pointer border-2 border-dashed border-zinc-600 hover:border-green-500 flex items-center justify-center">
+        <i class="fa-solid fa-image text-5xl text-zinc-500"></i>
+      </div>
+      <input type="file" id="coverInput" accept="image/*" class="hidden" onchange="previewCover(event)">
+    </div>
+
+    <input id="editTitle" type="text" class="w-full bg-zinc-800 rounded-xl px-5 py-3 mb-4" placeholder="Tytuł">
+    <input id="editArtist" type="text" class="w-full bg-zinc-800 rounded-xl px-5 py-3 mb-6" placeholder="Wykonawca">
+
+    <div class="flex gap-3">
+      <button onclick="closeModal()" class="flex-1 py-3 bg-zinc-800 rounded-xl hover:bg-zinc-700">Anuluj</button>
+      <button onclick="saveEdit()" class="flex-1 py-3 bg-green-600 rounded-xl hover:bg-green-500 font-semibold">Zapisz</button>
+    </div>
+  </div>
+</div>
+
+<audio id="audio" class="hidden"></audio>
+
+<script>
+// ================== SUPABASE ==================
+const SUPABASE_URL = "https://nzlqzulzlduhiuuomozk.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56bHF6dWx6bGR1aGl1dW9tb3prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMzA4NzksImV4cCI6MjA5MzgwNjg3OX0.Gqig92ysRncRxPYb9z3L_aBc-daedaw4dpZhN9Grh9A";
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let songs = [];
+let currentEditId = null;
+let audio = document.getElementById('audio');
+
+// Ładowanie utworów
+async function loadSongs() {
+  const { data, error } = await supabaseClient.from('songs').select('*').order('created_at', { ascending: false });
+  if (error) console.error(error);
+  songs = data || [];
+  renderSongs(songs);
+}
+
+// Dodawanie utworu
+async function uploadSong(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const title = prompt("Tytuł utworu:", file.name.replace(/\.[^/.]+$/, "")) || file.name;
+  const artist = prompt("Wykonawca:", "Nieznany") || "Nieznany";
+
+  const fileName = `${Date.now()}-${file.name}`;
+
+  const { error: uploadError } = await supabaseClient.storage.from('songs').upload(fileName, file, { upsert: true });
+
+  if (uploadError) {
+    alert("Błąd uploadu: " + uploadError.message);
+    return;
+  }
+
+  const { error: dbError } = await supabaseClient.from('songs').insert({
+    title, 
+    artist, 
+    file_path: fileName, 
+    cover: null
+  });
+
+  if (dbError) alert("Błąd bazy: " + dbError.message);
+  else {
+    alert("✅ Utwór dodany!");
+    loadSongs();
+  }
+}
+
+// Renderowanie listy
+function renderSongs(songArray) {
+  const tbody = document.getElementById('songList');
+  tbody.innerHTML = '';
+
+  songArray.forEach((song, i) => {
+    const tr = document.createElement('tr');
+    tr.className = "song-row border-b border-zinc-800 h-16 hover:bg-zinc-800 cursor-pointer";
+    tr.innerHTML = `
+      <td class="pl-6">${i+1}</td>
+      <td class="font-medium">${song.title}</td>
+      <td class="text-zinc-400">${song.artist}</td>
+      <td class="pr-6 text-right">
+        <button onclick="editSong('${song.id}'); event.stopImmediatePropagation()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded-lg mr-2">✏️</button>
+        <button onclick="playThis(event, '${song.file_path}', '${song.title}', '${song.artist}', '${song.cover || ''}')" class="bg-green-600 hover:bg-green-500 px-6 py-1.5 rounded-lg">Odtwórz</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function playThis(e, fileName, title, artist, cover) {
+  e.stopImmediatePropagation();
+  const { data } = supabaseClient.storage.from('songs').getPublicUrl(fileName);
+
+  document.getElementById('playerTitle').textContent = title;
+  document.getElementById('playerArtist').textContent = artist;
+
+  const coverDiv = document.getElementById('playerCover');
+  coverDiv.innerHTML = cover ? `<img src="${cover}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-music text-xl"></i>`;
+
+  audio.src = data.publicUrl;
+  audio.play();
+}
+
+function togglePlay() {
+  audio.paused ? audio.play() : audio.pause();
+}
+
+// Edycja
+async function editSong(id) {
+  currentEditId = id;
+  const song = songs.find(s => s.id === id);
+  if (!song) return;
+
+  document.getElementById('editTitle').value = song.title;
+  document.getElementById('editArtist').value = song.artist;
+
+  const modalCover = document.getElementById('modalCover');
+  modalCover.innerHTML = song.cover ? 
+    `<img src="${song.cover}" class="w-full h-full object-cover">` : 
+    `<i class="fa-solid fa-image text-5xl text-zinc-500"></i>`;
+
+  document.getElementById('editModal').classList.remove('hidden');
+}
+
+function previewCover(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('modalCover').innerHTML = `<img src="${ev.target.result}" class="w-full h-full object-cover">`;
+    window.tempCover = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveEdit() {
+  if (!currentEditId) return;
+  const title = document.getElementById('editTitle').value;
+  const artist = document.getElementById('editArtist').value;
+
+  const updateData = { title, artist };
+  if (window.tempCover) updateData.cover = window.tempCover;
+
+  const { error } = await supabaseClient.from('songs').update(updateData).eq('id', currentEditId);
+  if (error) alert("Błąd: " + error.message);
+  else {
+    alert("✅ Zapisano zmiany!");
+    closeModal();
+    loadSongs();
+  }
+}
+
+function closeModal() {
+  document.getElementById('editModal').classList.add('hidden');
+  window.tempCover = null;
+}
+
+function filterSongs() {
+  const term = document.getElementById('search').value.toLowerCase();
+  const filtered = songs.filter(s => 
+    s.title.toLowerCase().includes(term) || s.artist.toLowerCase().includes(term)
+  );
+  renderSongs(filtered);
+}
+
+// Inicjalizacja
+loadSongs();
+</script>
+</body>
+</html>
