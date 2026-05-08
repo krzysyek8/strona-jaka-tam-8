@@ -10,7 +10,7 @@
   <style>
     body { font-family: system-ui, sans-serif; }
     .song-row:hover { background-color: #2a2a2a; }
-    .progress-bar { height: 4px; background: #22c55e; transition: width 0.1s; }
+    .progress-bar { height: 4px; background: #22c55e; transition: width 0.1s linear; }
   </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen">
@@ -24,13 +24,13 @@
     </div>
 
     <button onclick="document.getElementById('fileInput').click()" 
-            class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-semibold flex items-center justify-center gap-3 mb-6">
+            class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-2xl font-semibold flex items-center justify-center gap-3 mb-8">
       <i class="fa-solid fa-upload"></i> DODAJ UTWÓR
     </button>
     <input type="file" id="fileInput" accept="audio/*" class="hidden" onchange="uploadSong(event)">
 
     <nav class="space-y-2">
-      <a href="#" onclick="showPlaylist('all')" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800" id="nav-all">
+      <a href="#" onclick="showPlaylist('all')" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800 bg-zinc-800" id="nav-all">
         <i class="fa-solid fa-list"></i> Wszystkie utwory
       </a>
       <a href="#" onclick="showPlaylist('favorites')" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800" id="nav-favorites">
@@ -53,7 +53,7 @@
           <th class="text-left py-4 w-12">#</th>
           <th class="text-left">Tytuł</th>
           <th class="text-left">Wykonawca</th>
-          <th class="w-44"></th>
+          <th class="w-52"></th>
         </tr>
       </thead>
       <tbody id="songList" class="text-zinc-200"></tbody>
@@ -61,10 +61,10 @@
   </div>
 </div>
 
-<!-- Zaawansowany Player -->
+<!-- Player -->
 <div class="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-700 h-24 flex items-center px-8 gap-6">
   <div class="flex items-center gap-4 w-80">
-    <div id="playerCover" class="w-14 h-14 bg-zinc-800 rounded-lg overflow-hidden flex-shrink-0">
+    <div id="playerCover" class="w-14 h-14 bg-zinc-800 rounded-lg overflow-hidden">
       <i class="fa-solid fa-music text-2xl flex items-center justify-center h-full"></i>
     </div>
     <div class="min-w-0">
@@ -93,14 +93,6 @@
   </div>
 </div>
 
-<!-- Modal edycji -->
-<div id="editModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-  <div class="bg-zinc-900 rounded-2xl w-full max-w-md p-8">
-    <h2 class="text-2xl font-bold mb-6">Edytuj utwór</h2>
-    <!-- ... (modal edycji bez zmian) ... -->
-  </div>
-</div>
-
 <audio id="audio" class="hidden"></audio>
 
 <script>
@@ -113,9 +105,10 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let songs = [];
 let currentIndex = -1;
 let isRepeat = false;
-let currentPlaylist = 'all'; // 'all' lub 'favorites'
+let currentPlaylist = 'all';
 let audio = document.getElementById('audio');
 
+// Ładowanie utworów
 async function loadSongs() {
   const { data, error } = await supabaseClient.from('songs').select('*').order('created_at', { ascending: false });
   if (error) console.error(error);
@@ -123,29 +116,64 @@ async function loadSongs() {
   renderSongs();
 }
 
-// ================== UPLOAD, RENDER, PLAY ==================
-async function uploadSong(e) { /* bez zmian z poprzedniej wersji */ }
+// Upload utworu
+async function uploadSong(e) {
+  const file = e.target.files[0];
+  if (!file) return;
 
-// Render
-function renderSongs(filtered = null) {
-  const list = filtered || songs;
+  const title = prompt("Tytuł utworu:", file.name.replace(/\.[^/.]+$/, "")) || file.name;
+  const artist = prompt("Wykonawca:", "Nieznany") || "Nieznany";
+
+  const fileName = `${Date.now()}-${file.name}`;
+
+  try {
+    const { error: uploadError } = await supabaseClient.storage
+      .from('songs')
+      .upload(fileName, file, { upsert: true });
+
+    if (uploadError) {
+      alert("Błąd uploadu: " + uploadError.message);
+      return;
+    }
+
+    const { error: dbError } = await supabaseClient.from('songs').insert({
+      title, 
+      artist, 
+      file_path: fileName, 
+      cover: null
+    });
+
+    if (dbError) alert("Błąd bazy: " + dbError.message);
+    else {
+      alert("✅ Utwór dodany pomyślnie!");
+      loadSongs();
+    }
+  } catch (err) {
+    alert("Nieoczekiwany błąd: " + err.message);
+  }
+}
+
+// Renderowanie listy
+function renderSongs(filteredSongs = null) {
+  const list = filteredSongs || songs;
   const tbody = document.getElementById('songList');
   tbody.innerHTML = '';
 
-  list.forEach((song, i) => {
+  list.forEach((song, globalIndex) => {
+    const index = songs.indexOf(song);
     const tr = document.createElement('tr');
     tr.className = "song-row border-b border-zinc-800 h-16 hover:bg-zinc-800 cursor-pointer";
     tr.innerHTML = `
-      <td class="pl-6">${i+1}</td>
+      <td class="pl-6">${index + 1}</td>
       <td class="font-medium">${song.title}</td>
       <td class="text-zinc-400">${song.artist}</td>
       <td class="pr-6 text-right flex gap-2 justify-end">
         <button onclick="toggleFavorite('${song.id}'); event.stopImmediatePropagation()" class="px-3 py-1 ${song.is_favorite ? 'text-red-500' : 'text-zinc-400'}">
-          <i class="fa-solid fa-heart"></i>
+          ❤️
         </button>
         <button onclick="editSong('${song.id}'); event.stopImmediatePropagation()" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded-lg">✏️</button>
         <button onclick="deleteSong('${song.id}'); event.stopImmediatePropagation()" class="bg-red-600 hover:bg-red-500 px-4 py-1.5 rounded-lg">🗑</button>
-        <button onclick="playSong(${songs.indexOf(song)})" class="bg-green-600 hover:bg-green-500 px-6 py-1.5 rounded-lg">Odtwórz</button>
+        <button onclick="playSong(${index}); event.stopImmediatePropagation()" class="bg-green-600 hover:bg-green-500 px-6 py-1.5 rounded-lg">Odtwórz</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -154,6 +182,7 @@ function renderSongs(filtered = null) {
 
 // Odtwarzanie
 function playSong(index) {
+  if (index < 0 || index >= songs.length) return;
   currentIndex = index;
   const song = songs[index];
   const { data } = supabaseClient.storage.from('songs').getPublicUrl(song.file_path);
@@ -167,18 +196,20 @@ function playSong(index) {
 }
 
 function togglePlay() {
-  audio.paused ? audio.play() : audio.pause();
+  if (audio.paused) audio.play();
+  else audio.pause();
   updatePlayButton();
 }
 
 function updatePlayButton() {
-  const btn = document.getElementById('playBtn');
-  btn.innerHTML = audio.paused ? `<i class="fa-solid fa-play"></i>` : `<i class="fa-solid fa-pause"></i>`;
+  document.getElementById('playBtn').innerHTML = audio.paused 
+    ? `<i class="fa-solid fa-play"></i>` 
+    : `<i class="fa-solid fa-pause"></i>`;
 }
 
-// Progress bar
+// Progress
 audio.ontimeupdate = () => {
-  const percent = (audio.currentTime / audio.duration) * 100 || 0;
+  const percent = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
   document.getElementById('progress').style.width = percent + '%';
   document.getElementById('currentTime').textContent = formatTime(audio.currentTime);
   document.getElementById('duration').textContent = formatTime(audio.duration);
@@ -190,11 +221,20 @@ function seek(e) {
   audio.currentTime = percent * audio.duration;
 }
 
-function formatTime(seconds) {
-  if (!seconds || isNaN(seconds)) return "0:00";
-  const min = Math.floor(seconds / 60);
-  const sec = Math.floor(seconds % 60);
-  return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+function formatTime(sec) {
+  if (!sec || isNaN(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function nextTrack() {
+  if (currentIndex < songs.length - 1) playSong(currentIndex + 1);
+  else if (isRepeat) playSong(0);
+}
+
+function prevTrack() {
+  if (currentIndex > 0) playSong(currentIndex - 1);
 }
 
 function toggleRepeat() {
@@ -204,24 +244,24 @@ function toggleRepeat() {
 
 audio.onended = () => {
   if (isRepeat) audio.play();
-  else if (currentIndex < songs.length - 1) playSong(currentIndex + 1);
+  else nextTrack();
 };
 
 // Usuwanie
 async function deleteSong(id) {
   if (!confirm("Na pewno chcesz usunąć ten utwór?")) return;
-  
   const { error } = await supabaseClient.from('songs').delete().eq('id', id);
-  if (error) alert("Błąd usuwania");
+  if (error) alert(error.message);
   else loadSongs();
 }
 
-// Ulubione (prosta implementacja playlist)
-async function toggleFavorite(id) {
-  // Na razie symulujemy - w przyszłości można dodać tabelę playlist
+// Ulubione
+function toggleFavorite(id) {
   const song = songs.find(s => s.id === id);
-  song.is_favorite = !song.is_favorite;
-  renderSongs();
+  if (song) {
+    song.is_favorite = !song.is_favorite;
+    renderSongs();
+  }
 }
 
 function showPlaylist(type) {
@@ -230,8 +270,8 @@ function showPlaylist(type) {
   document.getElementById('nav-favorites').classList.toggle('bg-zinc-800', type === 'favorites');
   
   if (type === 'favorites') {
-    const favorites = songs.filter(s => s.is_favorite);
-    renderSongs(favorites);
+    const fav = songs.filter(s => s.is_favorite);
+    renderSongs(fav);
     document.getElementById('pageTitle').textContent = "Ulubione";
   } else {
     renderSongs();
@@ -240,7 +280,11 @@ function showPlaylist(type) {
 }
 
 function filterSongs() {
-  const term = document.getElementById('search').value.toLowerCase();
+  const term = document.getElementById('search').value.toLowerCase().trim();
+  if (!term) {
+    showPlaylist(currentPlaylist);
+    return;
+  }
   const filtered = songs.filter(s => 
     s.title.toLowerCase().includes(term) || 
     s.artist.toLowerCase().includes(term)
@@ -248,7 +292,7 @@ function filterSongs() {
   renderSongs(filtered);
 }
 
-// Inicjalizacja
+// Start
 loadSongs();
 </script>
 </body>
